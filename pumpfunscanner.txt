@@ -1,0 +1,332 @@
+Your core question becomes:
+
+Which Pump.fun tokens are likely to give me a tradable move before migration, without getting trapped in a dev dump / holder dump / dead curve?
+
+Main dashboard focus
+
+Instead of post-migration stats, track these:
+
+Category	What to track	Why it matters
+Curve progress	% bonded / market cap / SOL in curve	Shows how close the token is to attention zone
+Speed	time from launch to 25%, 50%, 75%, 90% bonded	Fast curves attract more traders
+Volume	1m / 5m / 15m volume	Confirms real activity
+Buyer count	unique buyers over 1m / 5m / 15m	Better than raw volume
+Buy pressure	buys vs sells, SOL in vs SOL out	Shows whether momentum is still alive
+Holder quality	top holder %, dev %, fresh wallets	Detects concentration risk
+Dev activity	dev buy, dev sell, dev transfers	Major risk filter
+Sniper activity	first 10–20 buyers, bundle-like behavior	Helps avoid toxic charts
+Social presence	website, X, Telegram, CA mentions	Helps identify narrative traction
+Market-wide heat	launches/hour, active buyers, SOL price	Tells you whether conditions are good
+The most useful pre-migration metrics
+1. Bonding speed
+
+This may be one of the best signals.
+
+Track:
+
+Time to 25% bonded
+Time to 50% bonded
+Time to 75% bonded
+Time to 90% bonded
+
+Fast example:
+
+0% → 50% bonded in 4 minutes
+50% → 75% bonded in 3 minutes
+
+That tells you the token has momentum.
+
+Bad example:
+
+0% → 40% bonded in 3 minutes
+40% → 42% bonded over 20 minutes
+
+That is probably stalling.
+
+2. Curve acceleration
+
+Don’t just track current bonding percent. Track whether it is speeding up or slowing down.
+
+Bonding acceleration = current 5m bonding speed - previous 5m bonding speed
+
+Example:
+
+Time	Bonded %
+12:00	22%
+12:05	38%
+12:10	63%
+
+That is accelerating.
+
+But:
+
+Time	Bonded %
+12:00	22%
+12:05	45%
+12:10	48%
+
+That is dying.
+
+This could become a simple label:
+
+Curve Status: Accelerating / Slowing / Stalled / Reversing
+3. Entry zone tracker
+
+You could backtest which curve zones are best for you.
+
+Example zones:
+
+Zone	Meaning
+0–20% bonded	very early, highest risk
+20–40%	early momentum
+40–65%	possible sweet spot
+65–85%	crowded but stronger confirmation
+85–100%	migration chase risk
+
+Your dashboard should answer:
+
+When buying tokens between 35–60% bonded:
+- 2x hit rate: X%
+- average drawdown: X%
+- rug/dev dump rate: X%
+- average hold time: X minutes
+
+For your style, I’d care more about:
+
+Best pre-migration entry zone by expected value
+
+not just “which tokens migrated.”
+
+4. Pre-migration high probability setups
+
+Create setup types.
+
+Example:
+
+Type A: Fast Curve Momentum
+- 40–70% bonded
+- curve accelerating
+- 5m volume rising
+- unique buyers increasing
+- dev still holding
+- no large seller dominating
+Type B: Social Ignition
+- token has website/X/Telegram
+- CA mentions rising
+- curve above 30%
+- volume rising
+- buyers are not all snipers
+Type C: Whale-Supported Curve
+- 1–3 large wallets buying
+- smaller wallets following
+- whale not instantly selling
+- top holder concentration manageable
+Type D: Avoid / Trap
+- curve spikes then stalls
+- dev sells
+- same early wallets dumping
+- top holders too concentrated
+- volume is mostly one wallet
+5. Live token scanner table
+
+This would be your money screen.
+
+Token	Age	Bonded	5m Vol	Buyers	Buy/Sell	Dev	Top 10	Social	Score
+ABC	8m	58%	42 SOL	121	2.4	holding	18%	X/TG	86
+DOG	3m	35%	18 SOL	44	1.8	sold	31%	none	41
+AI	14m	72%	60 SOL	210	1.3	holding	14%	site/X	78
+
+Then color-code or label:
+
+TRADE
+WATCH
+AVOID
+TOXIC
+6. Pre-migration setup score
+
+Something like:
+
+Pre-Migration Score = 
+bonding speed
++ volume acceleration
++ unique buyer growth
++ buy/sell pressure
++ social presence
++ dev still holding
+- top holder concentration
+- sniper dump pressure
+- stalled curve penalty
+
+Example output:
+
+Token: XYZ
+Pre-Migration Score: 82/100
+Status: Watch for entry
+Reason:
+- 61% bonded
+- 5m volume accelerating
+- unique buyers rising
+- dev still holding
+- top 10 only 16%
+Risk:
+- first 5 buyers control 9%
+7. Dev wallet risk should be front and center
+
+Since you’re trading before migration, dev behavior matters immediately.
+
+Track:
+
+Dev action	Dashboard label
+Dev bought and still holds	positive
+Dev sold partial	caution
+Dev sold all	avoid
+Dev transferred to new wallet	high risk
+Dev funded multiple launches	repeat deployer
+Dev wallet linked to past dumps	toxic
+
+You could show:
+
+Dev Risk: LOW / MEDIUM / HIGH / TOXIC
+
+This should probably be one of the first columns.
+
+8. Holder concentration decay
+
+A token can look dangerous early but get healthier as buyers come in.
+
+Track:
+
+Top 10 holder % over time
+Top 5 holder % over time
+Largest non-curve wallet %
+Dev wallet %
+
+Useful signal:
+
+Top 10 concentration falling while curve rises = healthier distribution
+
+Bad signal:
+
+Curve rising but top 10 concentration staying high = dump risk
+9. Repeat early-wallet database
+
+This could be a major edge.
+
+Track the first 10–30 buyers of every token and classify them:
+
+Wallet type	Meaning
+Frequent winner	buys early and holds into pumps
+Fast dumper	exits within minutes
+Bundle wallet	appears with related wallets
+Dev-linked wallet	suspicious
+Fresh funded wallet	possible throwaway
+Smart pre-migration trader	valuable signal
+
+Then your dashboard can say:
+
+Early Wallet Quality: Good
+3 known profitable early wallets entered
+1 known fast dumper entered
+No dev-linked side wallets detected
+10. Stalled curve detector
+
+This is very important for pre-migration trading.
+
+Alert when:
+
+Bonding progress has moved less than 3% in 10 minutes
+AND sell volume is increasing
+AND unique buyers are flat
+
+Output:
+
+Curve Status: STALLED
+Suggested action: avoid new entries / consider exit
+11. Exit risk alerts
+
+Since you are trading before migration, you need alerts before the chart turns ugly.
+
+Alerts:
+
+- Dev sold
+- Top wallet sold more than 25%
+- Buy/sell ratio flipped negative
+- Curve progress stalled
+- 5m volume down 50% from prior 5m
+- Unique buyers stopped increasing
+- Large holder sent tokens to another wallet
+- Token dropped below previous bonding zone support
+12. Best-time dashboard, but pre-migration only
+
+Instead of “best time for migrations,” track:
+
+Best time to buy before migration
+
+By hour:
+
+Hour ET	Avg 2x rate before migration	Avg rug rate	Median drawdown	Avg time to 50% bonded
+8 PM	12%	38%	44%	11m
+9 PM	19%	31%	35%	7m
+10 PM	16%	42%	48%	6m
+
+You want to find:
+
+High upside + lower drawdown + enough volume
+
+not just highest migration count.
+
+13. Trade journal integration
+
+Every time you trade, save:
+
+entry time
+entry bonded %
+entry market cap
+entry volume
+entry dev status
+entry top 10 %
+entry buyer count
+entry score
+exit result
+reason for exit
+
+Then your dashboard can tell you:
+
+Your best trades happen when:
+- token is 45–70% bonded
+- dev still holds
+- top 10 under 20%
+- 5m unique buyers above 75
+- SOL is flat/up
+
+That is how you turn the dashboard into something personal to your trading style.
+
+My suggested MVP
+
+Start with this first:
+
+1. Live Pump.fun token scanner
+2. Bonding % and bonding speed
+3. 1m/5m/15m volume
+4. Unique buyers
+5. Buy/sell ratio
+6. Dev wallet status
+7. Top 10 holder %
+8. Social links present
+9. Pre-migration score
+10. Best time-of-day stats
+
+Then add the advanced stuff:
+
+11. Repeat early-wallet classification
+12. Dev-linked side wallet detection
+13. Stalled curve alerts
+14. Backtest by entry bonding zone
+15. Personal trade journal analysis
+
+The most valuable tack-on for your exact style would be:
+
+Pre-Migration Edge Finder:
+Find tokens between 35–75% bonded where bonding speed is accelerating, unique buyers are rising, dev is still holding, top-holder concentration is falling, and social presence exists.
+
+That is the screen I’d build first.
