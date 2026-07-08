@@ -63,3 +63,9 @@ CURVE_TARGET_SOL = 85.0
 
 # Prune a token's trade subscription this long after launch (keeps the sub set small).
 TOKEN_TTL_MIN = _int("TOKEN_TTL_MIN", 90)
+
+# --- best-times analysis ---
+# Empirical-Bayes shrinkage: an hour's heat is pulled toward the global mean by
+# this many pseudo-samples, so thin hours don't rank as falsely hot.
+BEST_TIMES_SHRINKAGE = _int("BEST_TIMES_SHRINKAGE", 30)
+BEST_TIMES_MIN_SAMPLES = _int("BEST_TIMES_MIN_SAMPLES", 20)  # below this = low confidence

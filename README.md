@@ -38,8 +38,11 @@ monitor keeps running and treats SOL froth as neutral.
 panel and GO/WAIT call, and logs a snapshot to SQLite every minute.
 
 **History / best-times** — `best_times.py` reads the logged snapshots and shows when
-heat/volume/migration flow have historically been strongest, by hour of day (and
-optionally day-of-week × hour). The longer the monitor runs, the sharper this gets.
+heat / volume / migration flow / froth have historically been strongest, by hour of
+day (and optionally day-of-week × hour). Thin hours are down-weighted via
+empirical-Bayes shrinkage (an hour seen only a couple of times can't rank as falsely
+hot), and each row carries a confidence marker. The longer the monitor runs, the
+sharper this gets.
 
 ## Files
 
@@ -83,9 +86,9 @@ grounded in your actual platform, not defaults.
 
 ## Roadmap
 
-- Confidence weighting on best-times (down-weight thin hours)
-- Froth columns in the best-times report
 - Optional fear & greed input
+- Alert on WAIT→GO *and* GO→WAIT (exit-timing)
+- Run as a systemd service with auto-restart
 
 ## Project spec
 
