@@ -12,6 +12,7 @@ import asyncio
 import json
 import time
 
+import aiohttp
 import websockets
 from rich.console import Console
 from rich.live import Live
@@ -21,6 +22,7 @@ from rich.table import Table
 import config
 import heat as heat_mod
 import storage
+from alerts import GoAlerter
 from platform_state import PlatformState
 
 console = Console()
@@ -30,20 +32,21 @@ CONN = storage.connect()
 SIGNAL_STYLE = {"GO": "bold white on green", "NEUTRAL": "black on yellow", "WAIT": "bold white on red"}
 
 _last_snapshot = 0.0
-_last_heat = (0, "NEUTRAL", [])
 
 
 def _fmt(v, suffix="", nd=1):
     return "—" if v is None else f"{v:.{nd}f}{suffix}"
 
 
-def render() -> Panel:
+def evaluate() -> tuple[dict, int, str, list[str], int]:
+    """Compute current snapshot + heat once, for both display and alerting."""
     snap = STATE.snapshot()
     baseline = storage.recent(CONN, config.BASELINE_HOURS)
     heat, signal, reasons = heat_mod.compute(snap, baseline)
-    global _last_heat
-    _last_heat = (heat, signal, reasons)
+    return snap, heat, signal, reasons, len(baseline)
 
+
+def render(snap: dict, heat: int, signal: str, reasons: list[str], baseline_n: int) -> Panel:
     t = Table.grid(padding=(0, 2))
     t.add_column(justify="right", style="cyan")
     t.add_column()
@@ -63,62 +66,82 @@ def render() -> Panel:
     grid.add_row(t)
     grid.add_row("")
     grid.add_row(f"[dim]{why}[/]")
-    base_note = "" if len(baseline) >= config.MIN_BASELINE_SNAPSHOTS else \
-        f"  [dim](cold start — using reference levels; {len(baseline)}/{config.MIN_BASELINE_SNAPSHOTS} snapshots)[/]"
+    base_note = "" if baseline_n >= config.MIN_BASELINE_SNAPSHOTS else \
+        f"  [dim](cold start — using reference levels; {baseline_n}/{config.MIN_BASELINE_SNAPSHOTS} snapshots)[/]"
     grid.add_row(base_note)
     return Panel(grid, title="Pumpfun Platform Heat", border_style="cyan")
 
 
-def maybe_snapshot() -> None:
+def maybe_snapshot(snap: dict, heat: int) -> None:
     global _last_snapshot
     now = time.time()
     if now - _last_snapshot < config.SNAPSHOT_INTERVAL_S:
         return
     _last_snapshot = now
-    snap = STATE.snapshot()
-    heat, _sig, _r = _last_heat
     storage.write_snapshot(CONN, snap, heat)
     STATE.prune(config.TOKEN_TTL_MIN)
 
 
-async def consume() -> None:
+def ingest(msg: dict, subscribe_queue: list[str]) -> None:
+    """Fold one PumpPortal message into platform state."""
+    tx = msg.get("txType")
+    mint = msg.get("mint")
+    if tx == "create" and mint:
+        STATE.on_create(mint)
+        subscribe_queue.append(mint)  # queue trade-sub for this token
+        sol = float(msg.get("solAmount", 0) or 0)
+        if sol:
+            STATE.on_trade(sol, True, msg.get("traderPublicKey", ""))
+    elif tx in ("buy", "sell") and mint:
+        STATE.on_trade(float(msg.get("solAmount", 0) or 0),
+                       tx == "buy", msg.get("traderPublicKey", ""))
+    elif (tx == "migrate" or msg.get("pool")) and mint:
+        STATE.on_migration(mint)
+
+
+async def consume(session: aiohttp.ClientSession, alerter: GoAlerter) -> None:
     async for ws in websockets.connect(config.PUMPPORTAL_WS_URL, ping_interval=20):
         try:
             await ws.send(json.dumps({"method": "subscribeNewToken"}))
             await ws.send(json.dumps({"method": "subscribeMigration"}))
-            with Live(render(), console=console, refresh_per_second=1) as live:
+            snap, heat, signal, reasons, bn = evaluate()
+            with Live(render(snap, heat, signal, reasons, bn), console=console, refresh_per_second=1) as live:
+                last_ui = 0.0
                 async for raw in ws:
                     try:
                         msg = json.loads(raw)
                     except json.JSONDecodeError:
                         continue
-                    tx = msg.get("txType")
-                    mint = msg.get("mint")
-                    if tx == "create" and mint:
-                        STATE.on_create(mint)
-                        # subscribe to this token's trades for platform-wide volume
+                    subs: list[str] = []
+                    ingest(msg, subs)
+                    for mint in subs:
                         await ws.send(json.dumps({"method": "subscribeTokenTrade", "keys": [mint]}))
-                        sol = float(msg.get("solAmount", 0) or 0)
-                        if sol:
-                            STATE.on_trade(sol, True, msg.get("traderPublicKey", ""))
-                    elif tx in ("buy", "sell") and mint:
-                        STATE.on_trade(float(msg.get("solAmount", 0) or 0),
-                                       tx == "buy", msg.get("traderPublicKey", ""))
-                    elif msg.get("txType") == "migrate" or "migration" in str(msg.get("pool", "")).lower():
-                        if mint:
-                            STATE.on_migration(mint)
-                    maybe_snapshot()
-                    live.update(render())
+
+                    now = time.time()
+                    if now - last_ui >= 1.0:      # throttle recompute/UI/alert to ~1Hz
+                        last_ui = now
+                        snap, heat, signal, reasons, bn = evaluate()
+                        maybe_snapshot(snap, heat)
+                        live.update(render(snap, heat, signal, reasons, bn))
+                        await alerter.maybe_alert(session, signal, snap, heat, reasons)
         except websockets.ConnectionClosed:
             console.print("[yellow]connection closed, reconnecting…[/]")
             continue
 
 
+async def run() -> None:
+    alerter = GoAlerter()
+    async with aiohttp.ClientSession() as session:
+        await consume(session, alerter)
+
+
 def main() -> None:
     console.print("[bold cyan]Pumpfun Platform Heat[/] — connecting to PumpPortal…")
     console.print(f"[dim]logging snapshots to {config.DB_PATH} every {config.SNAPSHOT_INTERVAL_S}s[/]")
+    if config.DISCORD_WEBHOOK_URL:
+        console.print("[dim]Discord GO-alerts enabled[/]")
     try:
-        asyncio.run(consume())
+        asyncio.run(run())
     except KeyboardInterrupt:
         console.print("\n[dim]stopped.[/]")
 

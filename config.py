@@ -33,6 +33,7 @@ SNAPSHOT_INTERVAL_S = _int("SNAPSHOT_INTERVAL_S", 60)      # how often to log a 
 # --- live signal thresholds ---
 GO_THRESHOLD = _int("GO_THRESHOLD", 65)       # composite heat >= this => GO
 WAIT_THRESHOLD = _int("WAIT_THRESHOLD", 40)   # composite heat <  this => WAIT
+GO_ALERT_COOLDOWN_MIN = _float("GO_ALERT_COOLDOWN_MIN", 30.0)  # min gap between GO alerts
 
 # Trailing baseline: current conditions are judged against the median of the last
 # BASELINE_HOURS of snapshots. Below MIN_BASELINE_SNAPSHOTS we cold-start on the
