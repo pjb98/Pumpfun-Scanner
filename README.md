@@ -1,80 +1,82 @@
 # Pumpfun Scanner
 
-A live **Pump.fun pre-migration token scanner**. Instead of analyzing tokens after
-they migrate, it surfaces tokens that are likely to give a tradable move **before**
-migration — while filtering out dev dumps, holder dumps, and dead curves.
+A **Pump.fun platform-heat monitor**. It doesn't pick individual tokens — you trade
+those yourself. It watches the *whole platform* and tells you **when conditions are
+good to be trading**: when volume is up, tokens are migrating quickly and in high
+quantity, launches are pouring in, and buy pressure is strong.
 
-> Core question: *Which Pump.fun tokens are likely to give a tradable move before
-> migration, without getting trapped in a dev dump / holder dump / dead curve?*
+> Core question: *Is right now a good time to be trading Pump.fun — and which
+> hours/conditions are historically the best?*
 
-## What it tracks
+## What it measures (platform-wide)
 
-| Category | Signals | Why it matters |
-| --- | --- | --- |
-| **Curve progress** | % bonded, market cap, SOL in curve | How close to the attention zone |
-| **Bonding speed** | time to 25% / 50% / 75% / 90% bonded | Fast curves attract traders |
-| **Curve acceleration** | change in 5m bonding speed | Accelerating vs stalling vs reversing |
-| **Volume** | 1m / 5m / 15m volume | Confirms real activity |
-| **Buyers** | unique buyers over 1m / 5m / 15m | Better than raw volume |
-| **Buy pressure** | buys vs sells, SOL in vs out | Is momentum still alive |
-| **Holder quality** | top-10 %, dev %, fresh wallets | Concentration / dump risk |
-| **Dev activity** | dev buy / sell / transfers | Major risk filter |
-| **Sniper activity** | first 10–20 buyers, bundle behavior | Avoid toxic charts |
-| **Social presence** | website, X, Telegram, CA mentions | Narrative traction |
-| **Market heat** | launches/hour, active buyers, SOL price | Are conditions good |
+| Metric | Meaning |
+| --- | --- |
+| **Launch rate** | new tokens / min — how busy the casino is |
+| **Migration rate** | migrations / hour — how much is actually graduating |
+| **Migration speed** | median minutes for migrating tokens to bond — faster = hotter |
+| **Volume (5m)** | aggregate SOL traded across tracked tokens |
+| **Active buyers (5m)** | unique wallets buying platform-wide |
+| **Buy/sell pressure** | aggregate SOL in vs out |
 
-## Pre-migration score
+These roll into a single composite **heat score (0–100)** and a **GO / NEUTRAL / WAIT**
+signal. "Hot" is judged **relative to a trailing baseline** of your own recorded
+history (it cold-starts on reference levels until enough history exists), because raw
+Pump.fun numbers drift over time.
 
-A composite score drives a simple label per token:
+## Two modes
 
-```
-Pre-Migration Score =
-    bonding speed
-  + volume acceleration
-  + unique buyer growth
-  + buy/sell pressure
-  + social presence
-  + dev still holding
-  - top holder concentration
-  - sniper dump pressure
-  - stalled curve penalty
-```
+**Live** — `monitor.py` streams the platform in real time, shows the current heat
+panel and GO/WAIT call, and logs a snapshot to SQLite every minute.
 
-Tokens are labeled **TRADE / WATCH / AVOID / TOXIC**.
+**History / best-times** — `best_times.py` reads the logged snapshots and shows when
+heat/volume/migration flow have historically been strongest, by hour of day (and
+optionally day-of-week × hour). The longer the monitor runs, the sharper this gets.
 
-## MVP roadmap
+## Files
 
-1. Live Pump.fun token scanner table
-2. Bonding % and bonding speed
-3. 1m / 5m / 15m volume
-4. Unique buyers
-5. Buy/sell ratio
-6. Dev wallet status
-7. Top-10 holder %
-8. Social links present
-9. Pre-migration score
-10. Best time-of-day stats
-
-**Later:** repeat early-wallet classification, dev-linked side-wallet detection,
-stalled-curve alerts, backtest by entry bonding zone, personal trade-journal analysis.
-
-The first screen to build — the **Pre-Migration Edge Finder**: tokens between
-35–75% bonded where bonding speed is accelerating, unique buyers are rising, dev is
-still holding, top-holder concentration is falling, and social presence exists.
+| File | Role |
+| --- | --- |
+| `monitor.py` | Live platform-heat monitor + snapshot logger (run this continuously) |
+| `platform_state.py` | Rolling platform-wide aggregation from the PumpPortal stream |
+| `heat.py` | Composite heat score + GO/NEUTRAL/WAIT signal vs trailing baseline |
+| `storage.py` | SQLite persistence of snapshots (stdlib) |
+| `best_times.py` | Hour-of-day / day-of-week best-time analysis over recorded history |
+| `config.py` | Settings from `.env` |
 
 ## Setup
 
 ```bash
 pip install -r requirements.txt
-cp .env.example .env   # then fill in your API keys
+cp .env.example .env      # optional — sane defaults work out of the box
 ```
 
 ## Usage
 
 ```bash
-python scanner.py
+# 1. run the monitor continuously (it collects history as it goes)
+python monitor.py
+
+# 2. after it has run for a while, see your best trading windows
+python best_times.py            # hour-of-day summary
+python best_times.py --dow      # + day-of-week x hour heatmap
 ```
+
+For real "best times" you want it running for **days**, ideally as a background
+service (systemd / tmux), so the hour-of-day patterns are built from enough data.
+
+## Calibration
+
+The cold-start `REF_*` levels in `.env` are rough guesses. Once you've collected a
+day or two of snapshots, set them near your own median values so the live signal is
+grounded in your actual platform, not defaults.
+
+## Roadmap
+
+- Discord alert when the signal flips to **GO**
+- Froth / SOL-price context as an extra input to the score
+- Confidence weighting on best-times (down-weight thin hours)
 
 ## Project spec
 
-See [`pumpfunscanner.txt`](pumpfunscanner.txt) for the full design notes.
+See [`pumpfunscanner.txt`](pumpfunscanner.txt) for the original design notes.
