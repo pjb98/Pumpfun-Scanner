@@ -18,11 +18,19 @@ quantity, launches are pouring in, and buy pressure is strong.
 | **Volume (5m)** | aggregate SOL traded across tracked tokens |
 | **Active buyers (5m)** | unique wallets buying platform-wide |
 | **Buy/sell pressure** | aggregate SOL in vs out |
+| **Pump.fun froth** | launch rate ÷ migration rate — frothy churn (your #1 lead) |
+| **SOL market froth** | f(SOL 24h % change, 24h volume vs baseline) — risk appetite |
+| **SOL price** | spot price + 24h change, shown as context |
 
 These roll into a single composite **heat score (0–100)** and a **GO / NEUTRAL / WAIT**
 signal. "Hot" is judged **relative to a trailing baseline** of your own recorded
 history (it cold-starts on reference levels until enough history exists), because raw
 Pump.fun numbers drift over time.
+
+**Heat weighting:** migrations 0.22 · volume 0.20 · pump.fun froth 0.18 · migration
+speed 0.16 · buyers 0.12 · SOL froth 0.12. SOL price/volume come from CoinGecko's
+free API (Binance is geo-blocked in many regions); if SOL data is unavailable the
+monitor keeps running and treats SOL froth as neutral.
 
 ## Two modes
 
@@ -39,7 +47,9 @@ optionally day-of-week × hour). The longer the monitor runs, the sharper this g
 | --- | --- |
 | `monitor.py` | Live platform-heat monitor + snapshot logger (run this continuously) |
 | `platform_state.py` | Rolling platform-wide aggregation from the PumpPortal stream |
-| `heat.py` | Composite heat score + GO/NEUTRAL/WAIT signal vs trailing baseline |
+| `heat.py` | Composite heat score (incl. pump.fun + SOL froth) + GO/NEUTRAL/WAIT signal |
+| `market.py` | SOL price / 24h change / volume from CoinGecko (cached, fail-safe) |
+| `alerts.py` | Discord webhook alert on the rising edge into GO |
 | `storage.py` | SQLite persistence of snapshots (stdlib) |
 | `best_times.py` | Hour-of-day / day-of-week best-time analysis over recorded history |
 | `config.py` | Settings from `.env` |
@@ -73,9 +83,9 @@ grounded in your actual platform, not defaults.
 
 ## Roadmap
 
-- Discord alert when the signal flips to **GO**
-- Froth / SOL-price context as an extra input to the score
 - Confidence weighting on best-times (down-weight thin hours)
+- Froth columns in the best-times report
+- Optional fear & greed input
 
 ## Project spec
 

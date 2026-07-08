@@ -26,6 +26,14 @@ def _float(name: str, default: float) -> float:
 PUMPPORTAL_WS_URL = os.getenv("PUMPPORTAL_WS_URL", "wss://pumpportal.fun/api/data")
 DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "")
 
+# --- SOL market data (CoinGecko public API, no key; Binance is geo-blocked in many regions) ---
+SOL_PRICE_URL = os.getenv(
+    "SOL_PRICE_URL",
+    "https://api.coingecko.com/api/v3/simple/price"
+    "?ids=solana&vs_currencies=usd&include_24hr_change=true&include_24hr_vol=true",
+)
+SOL_FETCH_INTERVAL_S = _int("SOL_FETCH_INTERVAL_S", 60)
+
 # --- persistence ---
 DB_PATH = os.getenv("DB_PATH", str(Path(__file__).parent / "data" / "platform_heat.sqlite"))
 SNAPSHOT_INTERVAL_S = _int("SNAPSHOT_INTERVAL_S", 60)      # how often to log a snapshot
@@ -47,6 +55,8 @@ REF_MIGRATIONS_PER_HOUR = _float("REF_MIGRATIONS_PER_HOUR", 12.0)
 REF_MIG_SPEED_MIN = _float("REF_MIG_SPEED_MIN", 30.0)   # median minutes to migrate (lower=hotter)
 REF_VOL_5M_SOL = _float("REF_VOL_5M_SOL", 300.0)
 REF_BUYERS_5M = _float("REF_BUYERS_5M", 400.0)
+REF_PF_FROTH = _float("REF_PF_FROTH", 40.0)         # launches/min ÷ migrations/min norm
+REF_SOL_VOL_24H = _float("REF_SOL_VOL_24H", 2.0e9)  # SOL/USDT 24h quote volume norm ($)
 
 # Pump.fun bonding curve: ~85 SOL in the curve == migration.
 CURVE_TARGET_SOL = 85.0

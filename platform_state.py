@@ -73,8 +73,22 @@ class PlatformState:
         sells = sum(s for (_t, s, is_buy, _w) in w if not is_buy)
         return buys / sells if sells > 0 else (buys if buys else 0.0)
 
+    def pumpfun_froth(self) -> float:
+        """Frothy churn = launch rate relative to migration rate.
+
+        High = tokens flooding in far faster than they graduate (speculative
+        churn); ~1x-scaled means launches and migrations are in step.
+        """
+        lpm = self.launches_per_min(300)
+        mpm = self.migrations_per_hour(3600) / 60.0  # migrations per minute
+        return lpm / mpm if mpm > 0 else (lpm if lpm else 0.0)
+
     def snapshot(self) -> dict:
-        """Current metrics as a flat dict for storage / display."""
+        """Current metrics as a flat dict for storage / display.
+
+        SOL market fields are left as None here and filled in by the caller
+        (see market.fetch_sol); sol_froth is computed in heat.compute.
+        """
         return {
             "ts": time.time(),
             "launches_5m": round(self.launches_per_min(300), 2),
@@ -83,6 +97,11 @@ class PlatformState:
             "vol_5m": round(self.volume_sol(300), 2),
             "buyers_5m": self.unique_buyers(300),
             "buy_sell": round(self.buy_sell_ratio(300), 2),
+            "pf_froth": round(self.pumpfun_froth(), 2),
+            "sol_price": None,
+            "sol_chg_24h": None,
+            "sol_vol_24h": None,
+            "sol_froth": None,
         }
 
     def prune(self, ttl_min: float) -> list[str]:
