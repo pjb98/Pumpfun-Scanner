@@ -7,6 +7,7 @@ faster migrations => hotter.
 """
 from __future__ import annotations
 
+import bisect
 import statistics
 
 import config
@@ -25,13 +26,65 @@ def _sub(ratio: float) -> float:
     return max(0.0, min(1.0, ratio / 2.0))
 
 
-def signal_from_heat(heat100: int) -> str:
-    """Map a 0-100 heat score to GO / NEUTRAL / WAIT via the configured thresholds."""
-    if heat100 >= config.GO_THRESHOLD:
+def signal_from_heat(heat100: int, go_cut: float | None = None,
+                     wait_cut: float | None = None) -> str:
+    """Map a 0-100 heat score to GO / NEUTRAL / WAIT.
+
+    Uses the given GO/WAIT cutoffs when provided (adaptive banding), otherwise
+    the fixed config thresholds.
+    """
+    go = config.GO_THRESHOLD if go_cut is None else go_cut
+    wait = config.WAIT_THRESHOLD if wait_cut is None else wait_cut
+    if heat100 >= go:
         return "GO"
-    if heat100 < config.WAIT_THRESHOLD:
+    if heat100 < wait:
         return "WAIT"
     return "NEUTRAL"
+
+
+def _pctl_value(sorted_heats: list[int], pct: float) -> float:
+    """Linear-interpolated value at percentile `pct` (0-100) of a sorted list."""
+    if not sorted_heats:
+        return 0.0
+    if len(sorted_heats) == 1:
+        return float(sorted_heats[0])
+    k = (len(sorted_heats) - 1) * pct / 100.0
+    lo = int(k)
+    hi = min(lo + 1, len(sorted_heats) - 1)
+    return sorted_heats[lo] + (sorted_heats[hi] - sorted_heats[lo]) * (k - lo)
+
+
+def percentile_rank(heat100: int, sorted_heats: list[int]) -> float | None:
+    """Percentile (0-100) of `heat100` within the sorted heat history.
+
+    `sorted_heats` MUST be pre-sorted ascending. Returns None until there is
+    enough history (MIN_PERCENTILE_SAMPLES) to be meaningful. Uses the midpoint
+    of the strictly-below and at-or-below ranks so ties land at their centre.
+    """
+    n = len(sorted_heats)
+    if n < config.MIN_PERCENTILE_SAMPLES:
+        return None
+    lo = bisect.bisect_left(sorted_heats, heat100)
+    hi = bisect.bisect_right(sorted_heats, heat100)
+    return round(100.0 * (lo + hi) / 2 / n, 1)
+
+
+def adaptive_bands(sorted_heats: list[int]) -> dict:
+    """GO/WAIT cutoffs for the live signal, from the heat-history distribution.
+
+    `sorted_heats` MUST be pre-sorted ascending. Below MIN_PERCENTILE_SAMPLES it
+    falls back to the fixed config thresholds (adaptive=False). Once adaptive, the
+    GO cutoff is floored at GO_ABS_FLOOR so a barely-warmer-than-dead market can't
+    trip GO. Returns {go_cut, wait_cut, adaptive, n}.
+    """
+    n = len(sorted_heats)
+    if n < config.MIN_PERCENTILE_SAMPLES:
+        return {"go_cut": config.GO_THRESHOLD, "wait_cut": config.WAIT_THRESHOLD,
+                "adaptive": False, "n": n}
+    go = max(int(round(_pctl_value(sorted_heats, config.GO_PERCENTILE))), config.GO_ABS_FLOOR)
+    wait = int(round(_pctl_value(sorted_heats, config.WAIT_PERCENTILE)))
+    wait = min(wait, go)  # keep WAIT <= GO even if the floor lifts GO above it
+    return {"go_cut": go, "wait_cut": wait, "adaptive": True, "n": n}
 
 
 def sol_market_froth(snap: dict, baseline_rows) -> float | None:
@@ -92,10 +145,13 @@ def _ratios(snap: dict, baseline_rows) -> tuple[dict[str, float], float | None]:
     return ratios, sol_froth
 
 
-def compute(snap: dict, baseline_rows) -> tuple[int, str, list[str]]:
+def compute(snap: dict, baseline_rows,
+            sorted_heats: list[int] | None = None) -> tuple[int, str, list[str]]:
     """Return (heat 0-100, signal, reasons). `baseline_rows` = recent snapshots.
 
-    Mutates `snap` to fill in the computed `sol_froth` for persistence.
+    If `sorted_heats` (the ascending heat history) is given, the GO/WAIT signal
+    uses adaptive percentile bands off that distribution; otherwise it uses the
+    fixed config thresholds. Mutates `snap` to fill in `sol_froth` for persistence.
     """
     reasons: list[str] = []
     ratios, sol_froth = _ratios(snap, baseline_rows)
@@ -104,6 +160,12 @@ def compute(snap: dict, baseline_rows) -> tuple[int, str, list[str]]:
     heat = sum(_sub(ratios[name]) * w for name, w in RATIO_WEIGHTS.items())
     heat += sol_sub * SOL_WEIGHT    # sol_froth: 0..1 already
     heat100 = int(round(heat * 100))
+
+    if sorted_heats is None:
+        signal = signal_from_heat(heat100)
+    else:
+        b = adaptive_bands(sorted_heats)
+        signal = signal_from_heat(heat100, b["go_cut"], b["wait_cut"])
 
     for name in RATIO_WEIGHTS:
         r = ratios[name]
@@ -117,7 +179,7 @@ def compute(snap: dict, baseline_rows) -> tuple[int, str, list[str]]:
         elif sol_froth <= 0.35:
             reasons.append(f"SOL risk-off ({snap.get('sol_chg_24h', 0):+.1f}% 24h)")
 
-    return heat100, signal_from_heat(heat100), reasons
+    return heat100, signal, reasons
 
 
 def components(snap: dict, baseline_rows) -> list[dict]:

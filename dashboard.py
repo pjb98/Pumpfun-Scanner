@@ -25,6 +25,7 @@ import config
 import heat as heat_mod
 import sizeguard
 import storage
+import wallet_pnl
 
 
 def _ro_conn() -> sqlite3.Connection | None:
@@ -40,29 +41,35 @@ def _ro_conn() -> sqlite3.Connection | None:
 def build_state() -> dict:
     """Assemble the full dashboard payload from the current DB contents."""
     size = sizeguard.stats()
+    wp = wallet_pnl.state()  # never raises; TTL-throttled fetch
     conn = _ro_conn()
     if conn is None:
-        return {"status": "no_data", "size": size, "generated": time.time()}
+        return {"status": "no_data", "size": size, "wallet_pnl": wp, "generated": time.time()}
     try:
         rows = storage.all_rows(conn)
         if not rows:
-            return {"status": "no_data", "size": size, "generated": time.time()}
+            return {"status": "no_data", "size": size, "wallet_pnl": wp, "generated": time.time()}
 
         baseline = storage.recent(conn, config.BASELINE_HOURS)
         latest = dict(rows[-1])
+        # Ascending heat history drives the adaptive percentile bands: the GO/WAIT
+        # cutoffs are percentiles of this distribution, so they move as data grows.
+        sorted_heats = sorted(r["heat"] for r in rows)
         # Recompute live so signal/reasons reflect the current baseline, not just
         # the heat frozen into the last logged row.
-        heat, signal, reasons = heat_mod.compute(dict(latest), baseline)
+        heat, signal, reasons = heat_mod.compute(dict(latest), baseline, sorted_heats)
         components = heat_mod.components(dict(latest), baseline)
+        bands = heat_mod.adaptive_bands(sorted_heats)
+        percentile = heat_mod.percentile_rank(heat, sorted_heats)
 
         cutoff = time.time() - config.DASHBOARD_HISTORY_HOURS * 3600
         history = [{"t": r["ts"], "heat": r["heat"]} for r in rows if r["ts"] >= cutoff]
 
         # How long the platform has held the current signal: walk logged snapshots
-        # backward while their heat maps to the same signal as right now.
+        # backward while their heat maps to the same signal (under today's bands).
         streak_start = latest["ts"]
         for r in reversed(rows):
-            if heat_mod.signal_from_heat(r["heat"]) == signal:
+            if heat_mod.signal_from_heat(r["heat"], bands["go_cut"], bands["wait_cut"]) == signal:
                 streak_start = r["ts"]
             else:
                 break
@@ -78,10 +85,13 @@ def build_state() -> dict:
             "reasons": reasons,
             "components": components,
             "streak_min": streak_min,
+            "percentile": percentile,
+            "bands": bands,
             "snapshot": latest,
             "history": history,
             "best_hours": best_times.hour_stats(rows),
             "dow_grid": best_times.dow_hour_grid(rows),
+            "wallet_pnl": wp,
             "size": size,
             "meta": {
                 "snapshots": len(rows),
@@ -89,8 +99,10 @@ def build_state() -> dict:
                 "baseline_n": baseline_n,
                 "cold_start": baseline_n < config.MIN_BASELINE_SNAPSHOTS,
                 "min_baseline": config.MIN_BASELINE_SNAPSHOTS,
-                "go_threshold": config.GO_THRESHOLD,
-                "wait_threshold": config.WAIT_THRESHOLD,
+                # effective (possibly adaptive) cutoffs — the sparkline draws these
+                "go_threshold": bands["go_cut"],
+                "wait_threshold": bands["wait_cut"],
+                "min_percentile_samples": config.MIN_PERCENTILE_SAMPLES,
             },
         }
     finally:
@@ -141,9 +153,13 @@ PAGE = """<!doctype html><html lang="en"><head>
   .badge{font-weight:750;font-size:22px;padding:8px 18px;border-radius:10px;color:#fff}
   .heat{font-size:34px;font-weight:750}
   .heat small{font-size:15px;color:var(--dim);font-weight:500}
-  .gauge{height:9px;border-radius:6px;background:#0b1424;overflow:hidden;margin-top:10px;
-         border:1px solid var(--edge)}
+  .gauge{position:relative;height:11px;border-radius:6px;background:#0b1424;overflow:hidden;
+         margin-top:10px;border:1px solid var(--edge)}
   .gauge > i{display:block;height:100%}
+  .gauge .tk{position:absolute;top:0;bottom:0;width:2px;transform:translateX(-1px);opacity:.9}
+  .gauge .tk.go{background:var(--go)} .gauge .tk.wait{background:var(--wait)}
+  .bands{color:var(--dim);font-size:12px;margin-top:8px}
+  .bands b{color:var(--txt);font-weight:650}
   .reasons{color:var(--dim);font-size:13px;margin-top:10px}
   .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-top:6px}
   .tile{background:#0f1a2e;border:1px solid var(--edge);border-radius:10px;padding:11px 13px}
@@ -179,6 +195,18 @@ PAGE = """<!doctype html><html lang="en"><head>
   .scale{display:flex;align-items:center;gap:8px;margin-top:10px;color:var(--dim);font-size:11.5px}
   .scale .bar{flex:1;max-width:220px;height:8px;border-radius:5px;
     background:linear-gradient(90deg,hsl(0,60%,42%),hsl(60,62%,45%),hsl(120,60%,40%))}
+  /* wallet P&L */
+  .pos{color:#22c55e} .neg{color:#f87171}
+  .pnl-hd{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+  .pnl-big{font-size:30px;font-weight:750;line-height:1.1}
+  .pnl-sub{color:var(--dim);font-size:12.5px;margin-left:auto;text-align:right}
+  .movers{display:grid;grid-template-columns:1fr 1fr;gap:10px 20px;margin-top:14px}
+  .movers .sect{margin-bottom:4px}
+  .mv{display:flex;justify-content:space-between;gap:10px;font-size:12.5px;padding:4px 0;
+      border-bottom:1px solid var(--edge)}
+  .mv a{color:var(--accent);text-decoration:none;font-family:ui-monospace,SFMono-Regular,monospace}
+  .mv .hold{color:var(--dim);font-size:10px;text-transform:uppercase;letter-spacing:.3px;margin-left:6px}
+  @media(max-width:640px){.movers{grid-template-columns:1fr}}
 </style></head><body><div class="wrap">
   <h1>Pumpfun Platform Heat</h1>
   <div class="sub" id="sub">loading…</div>
@@ -196,6 +224,73 @@ const dur = m => { if(m==null) return "—"; if(m<60) return `${Math.round(m)}m`
 const heatColor = v => `hsl(${(v/100)*120},62%,${38+(v/100)*10}%)`;
 
 function tile(label,val){ return `<div class="tile"><span>${label}</span><b>${val}</b></div>`; }
+
+function bandsLine(d){
+  const b=d.bands||{}, p=d.percentile, need=(d.meta&&d.meta.min_percentile_samples)||0;
+  if(!b.adaptive){
+    return `<span title="using fixed cutoffs until enough history is recorded">fixed bands ·
+      GO ≥ ${b.go_cut} · WAIT &lt; ${b.wait_cut} · self-calibrating after ${b.n||0}/${need} snapshots</span>`;
+  }
+  const pctTxt = (p==null) ? "—" : `<b>${p}th percentile</b>`;
+  return `<span title="GO/WAIT cutoffs are percentiles of your own heat history — they move as data grows">
+    adaptive · today's heat sits at ${pctTxt} of all ${b.n} snapshots ·
+    GO ≥ <b>${b.go_cut}</b> · WAIT &lt; <b>${b.wait_cut}</b></span>`;
+}
+
+const usd = v => v==null ? "—"
+  : (v<0?"−$":"$") + Math.abs(v).toLocaleString(undefined,{maximumFractionDigits:0});
+const shortMint = m => m.length>10 ? m.slice(0,4)+"…"+m.slice(-4) : m;
+
+function pnlSpark(hist){
+  if(!hist || hist.length<2) return "";
+  const W=1000,H=90,pad=6;
+  const t0=hist[0].t, t1=hist[hist.length-1].t, span=Math.max(1,t1-t0);
+  const vals=hist.map(p=>p.total==null?0:p.total);
+  let lo=Math.min(0,...vals), hi=Math.max(0,...vals); if(hi===lo) hi=lo+1;
+  const x=t=>pad+(t-t0)/span*(W-2*pad);
+  const y=v=>pad+(1-(v-lo)/(hi-lo))*(H-2*pad);
+  const pts=hist.map(p=>`${x(p.t).toFixed(1)},${y(p.total==null?0:p.total).toFixed(1)}`).join(" ");
+  const last=vals[vals.length-1];
+  return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="height:90px">
+    <line x1="${pad}" y1="${y(0)}" x2="${W-pad}" y2="${y(0)}" stroke="var(--dim)" stroke-width="1" stroke-dasharray="4 4" opacity=".5"/>
+    <polyline fill="none" stroke="${last>=0?'#22c55e':'#f87171'}" stroke-width="2" points="${pts}"/>
+  </svg>`;
+}
+
+function moverRow(m){
+  const cls=(m.total||0)>=0?'pos':'neg';
+  const hold=m.holding?'<span class="hold">open</span>':'';
+  return `<div class="mv"><a href="https://solscan.io/token/${m.mint}" target="_blank" rel="noopener">${shortMint(m.mint)}</a>${hold}
+    <span class="${cls}">${usd(m.total)}</span></div>`;
+}
+
+function pnlCard(wp){
+  if(!wp || wp.status==="disabled") return "";        // feature off — render nothing
+  if(wp.status==="error")
+    return `<div class="card"><div class="sect">Wallet P&amp;L</div>
+      <div class="dimtxt">couldn't reach SolanaTracker — ${wp.error||'error'}</div></div>`;
+  const s=wp.summary||{}, cls=(s.total||0)>=0?'pos':'neg';
+  const w=wp.wallet||"", link=`https://solscan.io/account/${w}`;
+  const age = wp.fetched ? ago(wp.fetched)+" ago" : "";
+  const staleTag = wp.status==="stale" ? ' · <span class="neg">stale</span>' : '';
+  const wl = (s.wins!=null) ? `${s.wins}W / ${s.losses}L · ${fmt(s.win_pct,0)}% win` : '';
+  const cols = (wp.status==="ok"||wp.status==="stale") ? `<div class="movers">
+      <div><div class="sect">Top winners</div>${(s.winners||[]).map(moverRow).join("")||'<div class="dimtxt">none</div>'}</div>
+      <div><div class="sect">Top losers</div>${(s.losers||[]).map(moverRow).join("")||'<div class="dimtxt">none</div>'}</div>
+    </div>` : '';
+  return `<div class="card">
+    <div class="sect">Wallet P&amp;L — <a href="${link}" target="_blank" rel="noopener" style="color:var(--accent);text-decoration:none">${shortMint(w)}</a> (all-time, SolanaTracker)</div>
+    <div class="pnl-hd">
+      <span class="pnl-big ${cls}">${usd(s.total)}</span>
+      <span class="pnl-sub">realized ${usd(s.realized)} · unrealized ${usd(s.unrealized)}<br>
+        invested ${usd(s.total_invested)} · ${s.tokens||0} tokens · ${age}${staleTag}</span>
+    </div>
+    <div class="reasons">${wl}</div>
+    ${pnlSpark(wp.history)}
+    ${cols}
+    <div class="foot">Closes the loop on the heat signal: are the GO windows actually paying off?</div>
+  </div>`;
+}
 
 function breakdown(comps){
   if(!comps || !comps.length) return "";
@@ -275,7 +370,8 @@ async function refresh(){
 
   if(d.status!=="ok"){
     sub.textContent="waiting for the monitor to log its first snapshots…";
-    body.innerHTML = `<div class="card"><div class="sect">Disk footprint</div>${sizePanel(sz)}</div>`;
+    body.innerHTML = pnlCard(d.wallet_pnl)
+      + `<div class="card"><div class="sect">Disk footprint</div>${sizePanel(sz)}</div>`;
     return;
   }
   const s=d.snapshot, m=d.meta;
@@ -290,9 +386,14 @@ async function refresh(){
         <span class="heat">${d.heat}<small>/100 heat</small></span>
         <span class="pill" style="margin-left:auto">${d.signal} for ${dur(d.streak_min)}</span>
       </div>
-      <div class="gauge"><i style="width:${d.heat}%;background:${SIG[d.signal]}"></i></div>
+      <div class="gauge"><i style="width:${d.heat}%;background:${SIG[d.signal]}"></i>
+        <span class="tk wait" style="left:${m.wait_threshold}%" title="WAIT cutoff (${m.wait_threshold})"></span>
+        <span class="tk go" style="left:${m.go_threshold}%" title="GO cutoff (${m.go_threshold})"></span>
+      </div>
       <div class="reasons">${d.reasons.length?d.reasons.join("  ·  "):"conditions near baseline"}</div>
+      <div class="bands">${bandsLine(d)}</div>
     </div>
+    ${pnlCard(d.wallet_pnl)}
     <div class="card"><div class="sect">What's driving the heat</div>${breakdown(d.components)}</div>
     <div class="card"><div class="sect">Live platform metrics</div><div class="grid">
       ${tile("Launches /min", fmt(s.launches_5m,1))}

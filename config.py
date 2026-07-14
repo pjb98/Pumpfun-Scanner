@@ -40,9 +40,23 @@ SNAPSHOT_INTERVAL_S = _int("SNAPSHOT_INTERVAL_S", 60)      # how often to log a 
 HEADLESS_LOG_INTERVAL_S = _int("HEADLESS_LOG_INTERVAL_S", 60)  # status-line cadence in --headless
 
 # --- live signal thresholds ---
-GO_THRESHOLD = _int("GO_THRESHOLD", 65)       # composite heat >= this => GO
-WAIT_THRESHOLD = _int("WAIT_THRESHOLD", 40)   # composite heat <  this => WAIT
+# Two modes. Until MIN_PERCENTILE_SAMPLES of history exist, the signal uses the
+# fixed GO/WAIT_THRESHOLD levels below. Past that, it switches to *adaptive*
+# banding: GO/WAIT cutoffs are the GO_PERCENTILE / WAIT_PERCENTILE of your own
+# recorded heat distribution, so the bands re-calibrate as more data arrives —
+# a day that reads GO today can fall out of the GO band once a hotter stretch
+# raises the bar. GO_ABS_FLOOR keeps it from calling "best of a dead market" a GO.
+GO_THRESHOLD = _int("GO_THRESHOLD", 65)       # fixed fallback: heat >= this => GO
+WAIT_THRESHOLD = _int("WAIT_THRESHOLD", 40)   # fixed fallback: heat <  this => WAIT
 GO_ALERT_COOLDOWN_MIN = _float("GO_ALERT_COOLDOWN_MIN", 30.0)  # min gap between GO alerts
+
+# Adaptive (percentile) banding — the "self-calibrating" signal.
+GO_PERCENTILE = _float("GO_PERCENTILE", 80.0)      # GO = heat in the top ~20% of history
+WAIT_PERCENTILE = _float("WAIT_PERCENTILE", 40.0)  # WAIT = heat below the 40th percentile
+GO_ABS_FLOOR = _int("GO_ABS_FLOOR", 35)            # never emit GO below this absolute heat
+# Snapshots needed before trusting percentile bands (else fall back to fixed).
+# Crude at first (one time-of-day); sharpens toward a true norm over days/weeks.
+MIN_PERCENTILE_SAMPLES = _int("MIN_PERCENTILE_SAMPLES", 200)
 
 # Trailing baseline: current conditions are judged against the median of the last
 # BASELINE_HOURS of snapshots. Below MIN_BASELINE_SNAPSHOTS we cold-start on the
@@ -72,6 +86,19 @@ TOKEN_TTL_MIN = _int("TOKEN_TTL_MIN", 90)
 DASHBOARD_HOST = os.getenv("DASHBOARD_HOST", "127.0.0.1")
 DASHBOARD_PORT = _int("DASHBOARD_PORT", 8787)  # 8000 is used by another project on this box
 DASHBOARD_HISTORY_HOURS = _float("DASHBOARD_HISTORY_HOURS", 24.0)
+
+# --- wallet P&L (wallet_pnl.py) ---
+# Track your own realized/unrealized P&L via SolanaTracker and show it on the
+# dashboard, so the signal can be judged against actual outcomes — not just
+# "is the platform statistically hot". Leave WALLET_ADDRESS blank to disable.
+WALLET_ADDRESS = os.getenv("WALLET_ADDRESS", "")
+SOLANATRACKER_API_KEY = os.getenv("SOLANATRACKER_API_KEY", "")
+SOLANATRACKER_BASE = os.getenv("SOLANATRACKER_BASE", "https://data.solanatracker.io")
+# The endpoint is quota-limited (~2.5k req/month on the basic plan), so the
+# dashboard only refetches when its cache is older than this. 30 min => ~48/day.
+WALLET_PNL_TTL_S = _int("WALLET_PNL_TTL_S", 1800)
+WALLET_PNL_HISTORY_MAX = _int("WALLET_PNL_HISTORY_MAX", 1000)  # trend points kept
+WALLET_PNL_TOP_N = _int("WALLET_PNL_TOP_N", 5)  # top winners/losers to surface
 
 # --- disk-footprint watch (sizeguard.py) ---
 SIZE_WARN_PROJECT_MB = _float("SIZE_WARN_PROJECT_MB", 500.0)   # warn if the project dir exceeds this

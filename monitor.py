@@ -35,6 +35,14 @@ SIGNAL_STYLE = {"GO": "bold white on green", "NEUTRAL": "black on yellow", "WAIT
 
 _last_snapshot = 0.0
 _last_sizecheck = 0.0
+# Ascending heat history for the adaptive percentile bands. Refreshed from the DB
+# once per snapshot (not per tick) so the hot loop stays cheap as history grows.
+_hist_sorted: list[int] = []
+
+
+def _refresh_hist() -> None:
+    global _hist_sorted
+    _hist_sorted = sorted(r[0] for r in CONN.execute("SELECT heat FROM snapshots"))
 
 
 def _fmt(v, suffix="", nd=1):
@@ -62,7 +70,8 @@ def evaluate(sol: dict) -> tuple[dict, int, str, list[str], int]:
     snap = STATE.snapshot()
     snap.update(sol)  # sol_price / sol_chg_24h / sol_vol_24h
     baseline = storage.recent(CONN, config.BASELINE_HOURS)
-    heat, signal, reasons = heat_mod.compute(snap, baseline)  # fills snap['sol_froth']
+    # adaptive percentile bands off the cached heat history (fills snap['sol_froth'])
+    heat, signal, reasons = heat_mod.compute(snap, baseline, _hist_sorted)
     return snap, heat, signal, reasons, len(baseline)
 
 
@@ -84,6 +93,11 @@ def render(snap: dict, heat: int, signal: str, reasons: list[str], baseline_n: i
     t.add_row("Tracked tokens", f"{len(STATE.created_at)}")
 
     why = ("  ·  ".join(reasons)) if reasons else "conditions near baseline"
+    band = heat_mod.adaptive_bands(_hist_sorted)
+    pct = heat_mod.percentile_rank(heat, _hist_sorted)
+    mode = "adaptive" if band["adaptive"] else "fixed"
+    pct_txt = f"p{pct:.0f}" if pct is not None else "p—"
+    band_line = f"bands: GO≥{band['go_cut']} WAIT<{band['wait_cut']} ({mode}) · today {pct_txt}"
     header = f"[{SIGNAL_STYLE.get(signal, '')}]  {signal}  [/]   heat {heat}/100"
     grid = Table.grid()
     grid.add_row(header)
@@ -91,6 +105,7 @@ def render(snap: dict, heat: int, signal: str, reasons: list[str], baseline_n: i
     grid.add_row(t)
     grid.add_row("")
     grid.add_row(f"[dim]{why}[/]")
+    grid.add_row(f"[dim]{band_line}[/]")
     base_note = "" if baseline_n >= config.MIN_BASELINE_SNAPSHOTS else \
         f"  [dim](cold start — using reference levels; {baseline_n}/{config.MIN_BASELINE_SNAPSHOTS} snapshots)[/]"
     grid.add_row(base_note)
@@ -104,6 +119,7 @@ def maybe_snapshot(snap: dict, heat: int) -> None:
         return
     _last_snapshot = now
     storage.write_snapshot(CONN, snap, heat)
+    _refresh_hist()  # fold the just-written heat into the adaptive-band history
     STATE.prune(config.TOKEN_TTL_MIN)
     maybe_size_warn()
 
@@ -131,8 +147,10 @@ def log_line(snap: dict, heat: int, signal: str, reasons: list[str]) -> None:
     sol = "—" if sol_p is None else f"${sol_p:,.0f}"
     ts = time.strftime("%H:%M:%S")
     why = "; ".join(reasons) if reasons else "near baseline"
+    pct = heat_mod.percentile_rank(heat, _hist_sorted)
+    pct_txt = f"p{pct:.0f}" if pct is not None else "p—"
     console.print(
-        f"{ts}  [{signal}] heat={heat:3d}  launch={snap['launches_5m']:.1f}/m  "
+        f"{ts}  [{signal}] heat={heat:3d} {pct_txt}  launch={snap['launches_5m']:.1f}/m  "
         f"migr={snap['migrations_1h']:.0f}/h  vol5m={snap['vol_5m']:.0f}  "
         f"pf_froth={snap.get('pf_froth', 0):.0f}  sol={sol}  | {why}",
         highlight=False, markup=False,
@@ -182,6 +200,7 @@ async def consume(session: aiohttp.ClientSession, alerter: GoAlerter, headless: 
 
 
 async def run(headless: bool = False) -> None:
+    _refresh_hist()  # prime the adaptive-band history from prior snapshots
     alerter = GoAlerter()
     async with aiohttp.ClientSession() as session:
         await consume(session, alerter, headless=headless)
