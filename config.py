@@ -65,6 +65,19 @@ CURVE_TARGET_SOL = 85.0
 # Prune a token's trade subscription this long after launch (keeps the sub set small).
 TOKEN_TTL_MIN = _int("TOKEN_TTL_MIN", 90)
 
+# --- web dashboard (dashboard.py) ---
+# Binds to localhost by default (reach it with `ssh -L 8787:localhost:8787 vps`).
+# Set DASHBOARD_HOST=0.0.0.0 to expose it directly on the VPS IP (read-only, but
+# then anyone who can reach the port can see it).
+DASHBOARD_HOST = os.getenv("DASHBOARD_HOST", "127.0.0.1")
+DASHBOARD_PORT = _int("DASHBOARD_PORT", 8787)  # 8000 is used by another project on this box
+DASHBOARD_HISTORY_HOURS = _float("DASHBOARD_HISTORY_HOURS", 24.0)
+
+# --- disk-footprint watch (sizeguard.py) ---
+SIZE_WARN_PROJECT_MB = _float("SIZE_WARN_PROJECT_MB", 500.0)   # warn if the project dir exceeds this
+SIZE_WARN_DISK_FREE_GB = _float("SIZE_WARN_DISK_FREE_GB", 5.0)  # warn if free disk drops below this
+SIZE_CHECK_INTERVAL_S = _int("SIZE_CHECK_INTERVAL_S", 900)      # monitor's passive size-check cadence
+
 # --- best-times analysis ---
 # Empirical-Bayes shrinkage: an hour's heat is pulled toward the global mean by
 # this many pseudo-samples, so thin hours don't rank as falsely hot.

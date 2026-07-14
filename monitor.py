@@ -22,6 +22,7 @@ from rich.table import Table
 import config
 import heat as heat_mod
 import market
+import sizeguard
 import storage
 from alerts import GoAlerter
 from platform_state import PlatformState
@@ -33,10 +34,27 @@ CONN = storage.connect()
 SIGNAL_STYLE = {"GO": "bold white on green", "NEUTRAL": "black on yellow", "WAIT": "bold white on red"}
 
 _last_snapshot = 0.0
+_last_sizecheck = 0.0
 
 
 def _fmt(v, suffix="", nd=1):
     return "—" if v is None else f"{v:.{nd}f}{suffix}"
+
+
+def maybe_size_warn() -> None:
+    """Periodically flag runaway disk footprint into the journal (throttled)."""
+    global _last_sizecheck
+    now = time.time()
+    if now - _last_sizecheck < config.SIZE_CHECK_INTERVAL_S:
+        return
+    _last_sizecheck = now
+    try:
+        warnings = sizeguard.stats()["warnings"]
+    except OSError:
+        return
+    if warnings:
+        console.print(f"[WARN] disk footprint: {'; '.join(warnings)}",
+                      highlight=False, markup=False)
 
 
 def evaluate(sol: dict) -> tuple[dict, int, str, list[str], int]:
@@ -87,6 +105,7 @@ def maybe_snapshot(snap: dict, heat: int) -> None:
     _last_snapshot = now
     storage.write_snapshot(CONN, snap, heat)
     STATE.prune(config.TOKEN_TTL_MIN)
+    maybe_size_warn()
 
 
 def ingest(msg: dict, subscribe_queue: list[str]) -> None:

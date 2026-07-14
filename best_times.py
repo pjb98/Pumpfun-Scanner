@@ -42,7 +42,7 @@ def _confidence(n: int) -> str:
     if n >= config.BEST_TIMES_MIN_SAMPLES * 3:
         return "[green]███[/] high"
     if n >= config.BEST_TIMES_MIN_SAMPLES:
-        return "[yellow]██[/dim] med"
+        return "[yellow]██[/] med"
     return "[dim]█  low[/]"
 
 
@@ -57,41 +57,63 @@ def _mean(rows, key: str):
     return statistics.mean(vals) if vals else None
 
 
-def hour_summary(rows) -> None:
+def hour_stats(rows) -> list[dict]:
+    """Per-hour-of-day summary (pure): confidence-adjusted heat + metric means.
+
+    Returns one dict per populated hour, in 00..23 order. `adj` is the heat mean
+    shrunk toward the global mean by sample count; `min_samples` marks confidence.
+    Shared by the CLI table and the web dashboard so the math stays in one place.
+    """
     by_hour: dict[int, list] = defaultdict(list)
     for r in rows:
         by_hour[datetime.fromtimestamp(r["ts"]).hour].append(r)
-
     global_heat = statistics.mean(r["heat"] for r in rows)
 
-    table = Table(title="Best times to trade — by hour of day (local time)")
-    for c in ("Hour", "Samples", "Conf", "Heat*", "Raw", "Vol 5m",
-              "Migr/hr", "Mig speed", "Buyers", "PF froth", "SOL froth"):
-        table.add_column(c)
-
-    ranked = []
+    out: list[dict] = []
     for h in range(24):
         rs = by_hour.get(h, [])
         if not rs:
             continue
         n = len(rs)
         raw = statistics.mean(x["heat"] for x in rs)
-        adj = _shrunk(raw, n, global_heat)
-        ranked.append((h, adj, n))
-
         speeds = [x["mig_speed_min"] for x in rs if x["mig_speed_min"] is not None]
-        pf = _mean(rs, "pf_froth")
-        solf = _mean(rs, "sol_froth")
+        out.append({
+            "hour": h,
+            "n": n,
+            "raw": raw,
+            "adj": _shrunk(raw, n, global_heat),
+            "solid": n >= config.BEST_TIMES_MIN_SAMPLES,
+            "vol_5m": statistics.mean(x["vol_5m"] for x in rs),
+            "migrations_1h": statistics.mean(x["migrations_1h"] for x in rs),
+            "mig_speed_min": statistics.median(speeds) if speeds else None,
+            "buyers_5m": statistics.mean(x["buyers_5m"] for x in rs),
+            "pf_froth": _mean(rs, "pf_froth"),
+            "sol_froth": _mean(rs, "sol_froth"),
+        })
+    return out
+
+
+def hour_summary(rows) -> None:
+    stats = hour_stats(rows)
+    ranked = [(s["hour"], s["adj"], s["n"]) for s in stats]
+
+    table = Table(title="Best times to trade — by hour of day (local time)")
+    for c in ("Hour", "Samples", "Conf", "Heat*", "Raw", "Vol 5m",
+              "Migr/hr", "Mig speed", "Buyers", "PF froth", "SOL froth"):
+        table.add_column(c)
+
+    for s in stats:
+        adj, pf, solf = s["adj"], s["pf_froth"], s["sol_froth"]
         table.add_row(
-            f"{h:02d}:00",
-            str(n),
-            _confidence(n),
+            f"{s['hour']:02d}:00",
+            str(s["n"]),
+            _confidence(s["n"]),
             f"[{_heat_style(adj)}]{adj:.0f}[/]",
-            f"[dim]{raw:.0f}[/]",
-            f"{statistics.mean(x['vol_5m'] for x in rs):.0f}",
-            f"{statistics.mean(x['migrations_1h'] for x in rs):.1f}",
-            f"{statistics.median(speeds):.0f}m" if speeds else "—",
-            f"{statistics.mean(x['buyers_5m'] for x in rs):.0f}",
+            f"[dim]{s['raw']:.0f}[/]",
+            f"{s['vol_5m']:.0f}",
+            f"{s['migrations_1h']:.1f}",
+            f"{s['mig_speed_min']:.0f}m" if s["mig_speed_min"] is not None else "—",
+            f"{s['buyers_5m']:.0f}",
             f"{pf:.0f}" if pf is not None else "—",
             f"{solf:.2f}" if solf is not None else "—",
         )
@@ -106,6 +128,31 @@ def hour_summary(rows) -> None:
         best = ", ".join(f"{h:02d}:00 ({a:.0f})" for h, a, _n in top)
         note = "" if solid else " [dim](low confidence — keep collecting)[/]"
         console.print(f"\n[bold green]Hottest hours:[/] {best}{note}")
+
+
+def dow_hour_grid(rows) -> dict:
+    """Confidence-adjusted heat per (day-of-week, hour), for the web heatmap.
+
+    Pure/JSON-friendly sibling of dow_heatmap(): returns
+      {"dow": ["Mon"..], "grid": [[val|null x24] x7], "global": mean, "n": total}
+    where each cell is the hour's heat shrunk toward the global mean (thin cells
+    can't read as falsely hot), or null if that (day, hour) has no samples.
+    """
+    cells: dict[tuple[int, int], list] = defaultdict(list)
+    for r in rows:
+        dt = datetime.fromtimestamp(r["ts"])
+        cells[(dt.weekday(), dt.hour)].append(r["heat"])
+    global_heat = statistics.mean(r["heat"] for r in rows)
+
+    grid: list[list] = []
+    for d in range(7):
+        row = []
+        for h in range(24):
+            vals = cells.get((d, h))
+            row.append(round(_shrunk(statistics.mean(vals), len(vals), global_heat), 1)
+                       if vals else None)
+        grid.append(row)
+    return {"dow": DOW, "grid": grid, "global": round(global_heat, 1), "n": len(rows)}
 
 
 def dow_heatmap(rows) -> None:

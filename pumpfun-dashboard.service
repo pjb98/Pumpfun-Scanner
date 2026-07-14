@@ -1,0 +1,28 @@
+[Unit]
+Description=Pumpfun Scanner — web dashboard
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+# --- install_service.sh regenerates these paths (WorkingDirectory has a space,
+# so the ExecStart executable is double-quoted for systemd's tokenizer) ---
+WorkingDirectory=/root/Pumpfun Scanner
+ExecStart="/root/Pumpfun Scanner/.venv/bin/python" dashboard.py
+# DASHBOARD_HOST / DASHBOARD_PORT / thresholds (optional — file may be absent)
+EnvironmentFile=-/root/Pumpfun Scanner/.env
+
+Restart=always
+RestartSec=5
+
+KillSignal=SIGINT
+TimeoutStopSec=10
+
+NoNewPrivileges=true
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
