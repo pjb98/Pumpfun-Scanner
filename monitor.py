@@ -106,14 +106,32 @@ def ingest(msg: dict, subscribe_queue: list[str]) -> None:
         STATE.on_migration(mint)
 
 
-async def consume(session: aiohttp.ClientSession, alerter: GoAlerter) -> None:
+def log_line(snap: dict, heat: int, signal: str, reasons: list[str]) -> None:
+    """Plain one-line status for headless/service mode (journal-friendly)."""
+    sol_p = snap.get("sol_price")
+    sol = "—" if sol_p is None else f"${sol_p:,.0f}"
+    ts = time.strftime("%H:%M:%S")
+    why = "; ".join(reasons) if reasons else "near baseline"
+    console.print(
+        f"{ts}  [{signal}] heat={heat:3d}  launch={snap['launches_5m']:.1f}/m  "
+        f"migr={snap['migrations_1h']:.0f}/h  vol5m={snap['vol_5m']:.0f}  "
+        f"pf_froth={snap.get('pf_froth', 0):.0f}  sol={sol}  | {why}",
+        highlight=False, markup=False,
+    )
+
+
+async def consume(session: aiohttp.ClientSession, alerter: GoAlerter, headless: bool = False) -> None:
     async for ws in websockets.connect(config.PUMPPORTAL_WS_URL, ping_interval=20):
         try:
             await ws.send(json.dumps({"method": "subscribeNewToken"}))
             await ws.send(json.dumps({"method": "subscribeMigration"}))
             snap, heat, signal, reasons, bn = evaluate(await market.fetch_sol(session))
-            with Live(render(snap, heat, signal, reasons, bn), console=console, refresh_per_second=1) as live:
-                last_ui = 0.0
+            live = None if headless else Live(
+                render(snap, heat, signal, reasons, bn), console=console, refresh_per_second=1)
+            if live:
+                live.start()
+            last_ui = last_log = 0.0
+            try:
                 async for raw in ws:
                     try:
                         msg = json.loads(raw)
@@ -130,26 +148,39 @@ async def consume(session: aiohttp.ClientSession, alerter: GoAlerter) -> None:
                         sol = await market.fetch_sol(session)  # cached, cheap
                         snap, heat, signal, reasons, bn = evaluate(sol)
                         maybe_snapshot(snap, heat)
-                        live.update(render(snap, heat, signal, reasons, bn))
+                        if live:
+                            live.update(render(snap, heat, signal, reasons, bn))
+                        elif now - last_log >= config.HEADLESS_LOG_INTERVAL_S:
+                            last_log = now
+                            log_line(snap, heat, signal, reasons)
                         await alerter.maybe_alert(session, signal, snap, heat, reasons)
+            finally:
+                if live:
+                    live.stop()
         except websockets.ConnectionClosed:
             console.print("[yellow]connection closed, reconnecting…[/]")
             continue
 
 
-async def run() -> None:
+async def run(headless: bool = False) -> None:
     alerter = GoAlerter()
     async with aiohttp.ClientSession() as session:
-        await consume(session, alerter)
+        await consume(session, alerter, headless=headless)
 
 
 def main() -> None:
+    import argparse
+    ap = argparse.ArgumentParser(description="Pump.fun platform-heat monitor")
+    ap.add_argument("--headless", action="store_true",
+                    help="plain log lines instead of the live TUI (for systemd/services)")
+    args = ap.parse_args()
+
     console.print("[bold cyan]Pumpfun Platform Heat[/] — connecting to PumpPortal…")
     console.print(f"[dim]logging snapshots to {config.DB_PATH} every {config.SNAPSHOT_INTERVAL_S}s[/]")
     if config.DISCORD_WEBHOOK_URL:
-        console.print("[dim]Discord GO-alerts enabled[/]")
+        console.print("[dim]Discord alerts enabled (GO entry + cooling exit)[/]")
     try:
-        asyncio.run(run())
+        asyncio.run(run(headless=args.headless))
     except KeyboardInterrupt:
         console.print("\n[dim]stopped.[/]")
 

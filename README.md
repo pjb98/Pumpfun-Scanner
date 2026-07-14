@@ -75,8 +75,33 @@ python best_times.py            # hour-of-day summary
 python best_times.py --dow      # + day-of-week x hour heatmap
 ```
 
-For real "best times" you want it running for **days**, ideally as a background
-service (systemd / tmux), so the hour-of-day patterns are built from enough data.
+For real "best times" you want it running for **days** so the hour-of-day patterns
+are built from enough data — easiest is to install it as a service (below).
+
+## Run as a service (recommended)
+
+Installs a systemd unit that starts on boot, auto-restarts on crash, and collects
+history unattended:
+
+```bash
+sudo ./install_service.sh          # creates .venv, installs + starts the service
+journalctl -u pumpfun-scanner -f   # watch live status lines
+systemctl status pumpfun-scanner
+```
+
+Under systemd it runs `monitor.py --headless` — one plain status line per minute
+(journal-friendly) instead of the live TUI. `--headless` also works standalone if
+you just want log output. To stop and disable: `systemctl disable --now pumpfun-scanner`.
+
+## Alerts
+
+If `DISCORD_WEBHOOK_URL` is set, the monitor posts a Discord embed on **both** signal
+edges (each with its own cooldown):
+
+- 🟢 **entry** — signal flips into **GO** (conditions turned good)
+- 🔴 **exit** — signal drops out of GO into NEUTRAL/WAIT (cooling — ease off)
+
+Only the edges alert, never every tick while a state holds.
 
 ## Calibration
 
@@ -87,8 +112,7 @@ grounded in your actual platform, not defaults.
 ## Roadmap
 
 - Optional fear & greed input
-- Alert on WAIT→GO *and* GO→WAIT (exit-timing)
-- Run as a systemd service with auto-restart
+- Web dashboard view of the heat history
 
 ## Project spec
 

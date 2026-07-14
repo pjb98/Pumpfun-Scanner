@@ -1,0 +1,32 @@
+[Unit]
+Description=Pumpfun Scanner — platform-heat monitor
+After=network-online.target
+Wants=network-online.target
+# don't let a crash-loop hammer PumpPortal: max 5 restarts / 60s, else back off
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+# --- edit these two if your paths differ ---
+# NOTE: the path has a space, so the executable is double-quoted (systemd
+# splits ExecStart on whitespace). install_service.sh regenerates these lines.
+WorkingDirectory=/root/Pumpfun Scanner
+ExecStart="/root/Pumpfun Scanner/.venv/bin/python" monitor.py --headless
+# loads DISCORD_WEBHOOK_URL, thresholds, etc. (optional — file may be absent)
+EnvironmentFile=-/root/Pumpfun Scanner/.env
+
+Restart=always
+RestartSec=5
+
+# keep the SQLite history from being wiped on stop
+KillSignal=SIGINT
+TimeoutStopSec=15
+
+# light hardening
+NoNewPrivileges=true
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

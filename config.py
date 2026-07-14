@@ -37,6 +37,7 @@ SOL_FETCH_INTERVAL_S = _int("SOL_FETCH_INTERVAL_S", 60)
 # --- persistence ---
 DB_PATH = os.getenv("DB_PATH", str(Path(__file__).parent / "data" / "platform_heat.sqlite"))
 SNAPSHOT_INTERVAL_S = _int("SNAPSHOT_INTERVAL_S", 60)      # how often to log a snapshot
+HEADLESS_LOG_INTERVAL_S = _int("HEADLESS_LOG_INTERVAL_S", 60)  # status-line cadence in --headless
 
 # --- live signal thresholds ---
 GO_THRESHOLD = _int("GO_THRESHOLD", 65)       # composite heat >= this => GO
